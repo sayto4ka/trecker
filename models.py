@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timedelta
@@ -29,6 +28,16 @@ THEME_COLORS = [
 
 FONT_SIZES = ["S", "M", "L"]
 
+# Палитра «цвет отметки серии» — 12 цветов, ровно как заданы в HTML-макете
+# экрана «Добавить привычку» (top-561 / top-603, слева направо).
+MARK_COLORS = [
+    "#39ff14", "#4a90e2", "#9a23e8", "#ffd700", "#dd0202", "#a8e6cf",
+    "#00f0ff", "#ff8800", "#ff007a", "#ffd3b6", "#3700ff", "#f200ff",
+]
+
+# Периодичность привычки — ровно как в макете: День / Неделя / Месяц
+PERIODS = [("day", "День"), ("week", "Неделя"), ("month", "Месяц")]
+
 
 def today() -> date:
     return date.today()
@@ -49,6 +58,8 @@ class Habit:
     icon: str = "⭐"
     target: int = 1                 # сколько раз в день нужно выполнить
     unit: str = "раз"               # единица измерения (раз, стаканов, страниц...)
+    period: str = "day"             # периодичность: day / week / month
+    color: str = MARK_COLORS[0]     # цвет отметки серии (палитра MARK_COLORS)
     reminder_time: Optional[str] = None   # "HH:MM" или None
     created: str = field(default_factory=lambda: date_to_str(today()))
     completions: Dict[str, int] = field(default_factory=dict)
@@ -58,6 +69,18 @@ class Habit:
 
     def is_done(self, d: date) -> bool:
         return self.progress_for(d) >= self.target
+
+    def current_streak(self) -> int:
+        """Текущая серия подряд выполненных дней, считая от сегодня
+        (если сегодня ещё не отмечено — считаем от вчера)."""
+        d = today()
+        if not self.is_done(d):
+            d -= timedelta(days=1)
+        streak = 0
+        while self.is_done(d):
+            streak += 1
+            d -= timedelta(days=1)
+        return streak
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -70,6 +93,8 @@ class Habit:
             icon=data.get("icon", "⭐"),
             target=data.get("target", 1),
             unit=data.get("unit", "раз"),
+            period=data.get("period", "day"),
+            color=data.get("color", MARK_COLORS[0]),
             reminder_time=data.get("reminder_time"),
             created=data.get("created", date_to_str(today())),
             completions=data.get("completions", {}),
@@ -81,8 +106,6 @@ def default_settings() -> dict:
         "name": None,
         "notifications": True,
         "font_size": "M",
-        "theme": random.choice(THEME_COLORS)[1],
-        "theme_date": date_to_str(today()),
     }
 
 
@@ -137,22 +160,13 @@ class HabitStore:
             self.settings["font_size"] = size
             self.save()
 
-    def maybe_reroll_theme(self):
-        """Раз в день тема приложения выбирается случайно из палитры."""
-        if self.settings.get("theme_date") != date_to_str(today()):
-            self.settings["theme"] = random.choice(THEME_COLORS)[1]
-            self.settings["theme_date"] = date_to_str(today())
-            self.save()
-
-    @property
-    def theme(self) -> str:
-        return self.settings.get("theme", THEME_COLORS[0][1])
-
     # ---------- CRUD привычек ----------
     def add_habit(self, name: str, icon: str, target: int, unit: str,
-                  reminder_time: Optional[str]) -> Habit:
+                  reminder_time: Optional[str], period: str = "day",
+                  color: str = MARK_COLORS[0]) -> Habit:
         h = Habit(id=str(uuid.uuid4()), name=name, icon=icon, target=max(1, target),
-                   unit=unit or "раз", reminder_time=reminder_time)
+                   unit=unit or "раз", reminder_time=reminder_time,
+                   period=period, color=color)
         self.habits.append(h)
         self.save()
         return h
@@ -183,10 +197,11 @@ class HabitStore:
 
     # ---------- выборки ----------
     def upcoming_reminders(self) -> List[Habit]:
-        """Привычки с напоминанием, ещё не выполненные сегодня, по времени."""
+        """Привычки с напоминанием, ещё не выполненные сегодня; сортировка по времени,
+        при совпадении времени — по алфавиту."""
         t = today()
         result = [h for h in self.habits if h.reminder_time and not h.is_done(t)]
-        result.sort(key=lambda h: h.reminder_time)
+        result.sort(key=lambda h: (h.reminder_time, h.name.lower()))
         return result
 
     def week_dates(self, anchor: Optional[date] = None) -> List[date]:

@@ -130,6 +130,16 @@ class HabitStore:
         total_marks = sum(len(h.completions) for h in self.habits)
         return {"habits": total_habits, "streak": best_streak, "marks": total_marks}
 
+    def wipe(self):
+        """Полностью удаляет файл данных и сбрасывает состояние в памяти."""
+        try:
+            if os.path.exists(DATA_FILE):
+                os.remove(DATA_FILE)
+        except OSError:
+            pass
+        self.habits = []
+        self.settings = default_settings()
+        
     def joined_label(self) -> str:
         raw = self.settings.get("joined")
         if not raw:

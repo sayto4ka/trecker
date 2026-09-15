@@ -2268,7 +2268,7 @@ class ProfilePage(QWidget):
             "color: rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; margin-left: 4px;"
         )
         outer.addWidget(acc_title)
-
+        
         self.username_row = ProfileRow("✎", self.store.settings.get("name", "") or "Пользователь", chevron=False)
         self.username_row.clicked.connect(self._edit_name)
         outer.addWidget(ProfileRowsCard([self.username_row]))
@@ -2327,17 +2327,15 @@ class ProfilePage(QWidget):
             self.refresh()
 
     def _delete_profile(self):
-        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox, QApplication
         reply = QMessageBox.question(
             self, "Удалить профиль",
-            "Профиль и все данные будут удалены безвозвратно.",
+            "Профиль и все данные будут удалены безвозвратно.\nПриложение будет закрыто.",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            self.store.habits = []
-            self.store.settings = default_settings()
-            self.store.save()
-            self.mw.restart_onboarding()
+            self.store.wipe()                 # чистим habits.json и состояние
+            QApplication.instance().quit()    # вырубаем приложение
 
 # ------------------------------------------------------------------ Bottom nav
 class BottomNav(QFrame):

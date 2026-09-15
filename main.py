@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from models import HabitStore, today
 from widgets import (
-    TopBar, CalendarPage, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
+    TopBar, ProfilePage, CalendarPage, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
         HabitRow, AddHabitForm, SettingsToggleRow, FontSizeRow, IconPickerPage,
     BottomNav, primary_button, res_icon, hide_scrollbar,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
@@ -36,8 +36,9 @@ IDX_SETTINGS = 5
 IDX_ICON_PICKER = 6
 IDX_STATS = 7
 IDX_CALENDAR = 8
+IDX_PROFILE = 9
 
-NAV_TABS = {IDX_HOME: 0, IDX_STATS: 1, IDX_SETTINGS: 2}
+NAV_TABS = {IDX_HOME: 0, IDX_STATS: 1, IDX_PROFILE: 2}
 
 
 def load_custom_fonts():
@@ -456,11 +457,12 @@ class MainWindow(QMainWindow):
         self.icon_picker_page.icon_chosen.connect(self.on_icon_chosen)
         self.stats_page = StatsPage(self.store, self)
         self.calendar_page = CalendarPage(self.store, self)
+        self.profile_page = ProfilePage(self.store, self)
 
         for page in (self.onboarding_page, self.home_page, self.habits_page,
                     self.add_habit_page, self.reminders_page,
                     self.settings_page, self.icon_picker_page, self.stats_page,
-                    self.calendar_page):
+                    self.calendar_page, self.profile_page):
             self.stack.addWidget(page)
 
         nav_wrap = QWidget()
@@ -487,6 +489,10 @@ class MainWindow(QMainWindow):
         self.add_habit_page.form.set_icon(emoji)
         self.go_to(IDX_ADD_HABIT)
 
+    def restart_onboarding(self):
+        self.nav_wrap.hide()
+        self.stack.setCurrentIndex(IDX_ONBOARDING)
+
     def on_name_submitted(self, name: str):
         self.store.set_name(name)
         self.nav_wrap.show()
@@ -510,6 +516,8 @@ class MainWindow(QMainWindow):
             self.stats_page.refresh()
         elif idx == IDX_CALENDAR:
             self.calendar_page.refresh()
+        elif idx == IDX_PROFILE:
+            self.profile_page.refresh()
 
 
 def main():

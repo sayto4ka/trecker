@@ -100,6 +100,13 @@ class Habit:
             completions=data.get("completions", {}),
         )
 
+def default_settings() -> dict:
+    return {
+        "name": None,
+        "notifications": True,
+        "font_size": "M",
+        "joined": None,
+    }
 
 def default_settings() -> dict:
     return {
@@ -116,6 +123,20 @@ class HabitStore:
         self.habits: List[Habit] = []
         self.settings: dict = default_settings()
         self.load()
+
+    def profile_stats(self) -> dict:
+        total_habits = len(self.habits)
+        best_streak = max((h.current_streak() for h in self.habits), default=0)
+        total_marks = sum(len(h.completions) for h in self.habits)
+        return {"habits": total_habits, "streak": best_streak, "marks": total_marks}
+
+    def joined_label(self) -> str:
+        raw = self.settings.get("joined")
+        if not raw:
+            return ""
+        d = str_to_date(raw)
+        return f"с нами с {d.day} {MONTHS_RU[d.month - 1].lower()} {d.year}"
+
 
     # ---------- персистентность ----------
     def load(self):
@@ -149,6 +170,8 @@ class HabitStore:
 
     def set_name(self, name: str):
         self.settings["name"] = name.strip()
+        if not self.settings.get("joined"):
+            self.settings["joined"] = date_to_str(today())
         self.save()
 
     def set_notifications(self, enabled: bool):

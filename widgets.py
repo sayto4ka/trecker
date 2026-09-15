@@ -2128,6 +2128,217 @@ class CalendarPage(QWidget):
             wrapper.setLayout(cell)
             self.days_grid.addWidget(wrapper, r, c)
 
+# ------------------------------------------------------------------ Профиль
+class ProfileRow(QFrame):
+    clicked = Signal()
+
+    def __init__(self, icon: str, label: str, value: str = "", danger: bool = False, chevron: bool = True, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(
+            "QFrame { background: transparent; } "
+            "QFrame:hover { background-color: rgba(255,255,255,0.04); }"
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+
+        ico = QLabel(icon)
+        ico.setFixedSize(32, 32)
+        ico.setAlignment(Qt.AlignCenter)
+        ico_bg = "rgba(255,107,94,0.18)" if danger else "rgba(93,95,239,0.18)"
+        ico.setStyleSheet(f"background-color: {ico_bg}; border-radius: 10px; font-size: 15px;")
+        layout.addWidget(ico)
+
+        lbl = QLabel(label)
+        lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 600;")
+        layout.addWidget(lbl, 1)
+        self.label_lbl = lbl
+
+        self.value_lbl = None
+        if value:
+            self.value_lbl = QLabel(value)
+            self.value_lbl.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 13px; font-weight: 600;")
+            layout.addWidget(self.value_lbl)
+
+        if chevron:
+            chev = QLabel("›")
+            chev.setStyleSheet("color: rgba(255,255,255,0.25); font-size: 14px;")
+            layout.addWidget(chev)
+
+    def set_label(self, text: str):
+        self.label_lbl.setText(text)
+
+    def set_value(self, text: str):
+        if self.value_lbl:
+            self.value_lbl.setText(text)
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class ProfileRowsCard(QFrame):
+    """Карточка-контейнер со скруглёнными углами и разделителями между строками."""
+
+    def __init__(self, rows: list, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.1); "
+            "border-radius: 16px; }"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        for i, row in enumerate(rows):
+            layout.addWidget(row)
+            if i < len(rows) - 1:
+                line = QFrame()
+                line.setFixedHeight(1)
+                line.setStyleSheet("background-color: rgba(255,255,255,0.06);")
+                layout.addWidget(line)
+
+
+class ProfilePage(QWidget):
+    """Экран «Профиль» — аватар, мини-статистика, аккаунт, данные."""
+
+    def __init__(self, store: HabitStore, mw: "MainWindow", parent=None):
+        super().__init__(parent)
+        self.store = store
+        self.mw = mw
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 14, 16, 12)
+        outer.setSpacing(20)
+
+        top = TopBar("Профиль", show_back=True)
+        top.back_clicked.connect(lambda: mw.go_to_home())
+        outer.addWidget(top)
+
+        head = QVBoxLayout()
+        head.setSpacing(0)
+        head.setAlignment(Qt.AlignCenter)
+
+        self.avatar = QLabel()
+        self.avatar.setFixedSize(96, 96)
+        self.avatar.setAlignment(Qt.AlignCenter)
+        self.avatar.setStyleSheet(
+            "background-color: #5D5FEF; border-radius: 48px; color: #ffffff; "
+            "font-size: 42px; font-weight: 800;"
+        )
+        head.addWidget(self.avatar, 0, Qt.AlignHCenter)
+        head.addSpacing(14)
+
+        self.name_lbl = QLabel()
+        self.name_lbl.setAlignment(Qt.AlignCenter)
+        self.name_lbl.setStyleSheet("color: #ffffff; font-size: 22px; font-weight: 800;")
+        head.addWidget(self.name_lbl)
+
+        self.since_lbl = QLabel()
+        self.since_lbl.setAlignment(Qt.AlignCenter)
+        self.since_lbl.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 12px; font-weight: 600;")
+        head.addSpacing(4)
+        head.addWidget(self.since_lbl)
+
+        outer.addLayout(head)
+
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(8)
+        self.stat_widgets = {}
+        for key, label in (("habits", "Привычек"), ("streak", "Серия"), ("marks", "Отметок")):
+            box = QFrame()
+            box.setStyleSheet("QFrame { background-color: #272732; border-radius: 14px; }")
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(8, 12, 8, 12)
+            box_layout.setSpacing(3)
+            v = QLabel("0")
+            v.setAlignment(Qt.AlignCenter)
+            v.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: 800;")
+            l = QLabel(label.upper())
+            l.setAlignment(Qt.AlignCenter)
+            l.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 10px; font-weight: 700;")
+            box_layout.addWidget(v)
+            box_layout.addWidget(l)
+            self.stat_widgets[key] = v
+            stats_row.addWidget(box, 1)
+        outer.addLayout(stats_row)
+
+        acc_title = QLabel("АККАУНТ")
+        acc_title.setStyleSheet(
+            "color: rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; margin-left: 4px;"
+        )
+        outer.addWidget(acc_title)
+
+        self.username_row = ProfileRow("✎", self.store.settings.get("name", "") or "Пользователь", chevron=False)
+        self.username_row.clicked.connect(self._edit_name)
+        outer.addWidget(ProfileRowsCard([self.username_row]))
+
+        data_title = QLabel("ДАННЫЕ")
+        data_title.setStyleSheet(
+            "color: rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; margin-left: 4px;"
+        )
+        outer.addWidget(data_title)
+
+        reset_row = ProfileRow("🗑", "Сбросить данные пользователя", danger=True, chevron=False)
+        reset_row.clicked.connect(self._reset_data)
+        outer.addWidget(ProfileRowsCard([reset_row]))
+
+        outer.addStretch()
+
+        delete_btn = QPushButton("Удалить профиль")
+        delete_btn.setCursor(Qt.PointingHandCursor)
+        delete_btn.setFixedHeight(46)
+        delete_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: 1px solid rgba(255,107,94,0.35); "
+            "border-radius: 16px; color: #ff6b5e; font-size: 14px; font-weight: 700; } "
+            "QPushButton:hover { background-color: rgba(255,107,94,0.08); }"
+        )
+        delete_btn.clicked.connect(self._delete_profile)
+        outer.addWidget(delete_btn)
+
+    def refresh(self):
+        name = self.store.settings.get("name") or "Пользователь"
+        self.name_lbl.setText(name)
+        self.avatar.setText(name[0].upper() if name else "?")
+        self.since_lbl.setText(self.store.joined_label())
+        self.username_row.set_label(name)
+        stats = self.store.profile_stats()
+        for key, v in self.stat_widgets.items():
+            v.setText(str(stats[key]))
+
+    def _edit_name(self):
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Имя пользователя", "Введите имя:",
+                                         text=self.store.settings.get("name", ""))
+        if ok and name.strip():
+            self.store.set_name(name)
+            self.refresh()
+
+    def _reset_data(self):
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Сбросить данные",
+            "Удалить все привычки и отметки? Это действие необратимо.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.store.habits = []
+            self.store.save()
+            self.refresh()
+
+    def _delete_profile(self):
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Удалить профиль",
+            "Профиль и все данные будут удалены безвозвратно.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.store.habits = []
+            self.store.settings = default_settings()
+            self.store.save()
+            self.mw.restart_onboarding()
+
 # ------------------------------------------------------------------ Bottom nav
 class BottomNav(QFrame):
     """Нижняя навигация: домик / статистика / профиль.
@@ -2183,7 +2394,7 @@ class BottomNav(QFrame):
             "QPushButton { background-color: transparent; border-radius: 14px; }"
             "QPushButton:checked { background-color: rgba(0,0,0,0.12); }"
         )
-        person_btn.clicked.connect(lambda: self.on_select(5))
+        person_btn.clicked.connect(lambda: self.on_select(9))
         layout.addWidget(person_btn)
         self.buttons.append(person_btn)
 

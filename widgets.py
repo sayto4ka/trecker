@@ -8,11 +8,15 @@ import calendar
 from datetime import date, timedelta
 from typing import Optional
 
+from PySide6.QtWidgets import QLayout, QLayoutItem, QSizePolicy as _QSP
+from PySide6.QtCore import QRect, QPoint, QSize as _QSize
+
 from PySide6.QtCore import Qt, Signal, QSize, QPointF, QRectF
 from PySide6.QtGui import QFont, QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QFrame,
     QLineEdit, QSpinBox, QComboBox, QCheckBox, QTimeEdit, QGraphicsDropShadowEffect,
+    QScrollArea, QSizePolicy
 )
 
 from models import Habit, HabitStore, WEEKDAYS_RU_SHORT, MONTHS_RU, THEME_COLORS, today, MARK_COLORS, PERIODS
@@ -71,6 +75,26 @@ def tinted_pixmap(filename: str, size: int, color: str) -> "QPixmap":
     painter.end()
     return tinted
 
+def circular_icon_pixmap(filename: str, diameter: int, bg_color: str = "#d9d9d9", padding_ratio: float = 0.18):
+    from PySide6.QtGui import QPixmap, QPainterPath
+    pm = QPixmap(diameter, diameter)
+    pm.fill(Qt.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.Antialiasing)
+    path = QPainterPath()
+    path.addEllipse(0, 0, diameter, diameter)
+    painter.setClipPath(path)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(bg_color))
+    painter.drawEllipse(0, 0, diameter, diameter)
+    inner = max(1, int(diameter * (1 - 2 * padding_ratio)))
+    src = res_icon(filename).pixmap(inner, inner)
+    scaled = src.scaled(inner, inner, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    x = (diameter - scaled.width()) // 2
+    y = (diameter - scaled.height()) // 2
+    painter.drawPixmap(x, y, scaled)
+    painter.end()
+    return pm
 
 def badge_color(key: str) -> str:
     return THEME_COLORS[hash(key) % len(THEME_COLORS)][1]
@@ -121,6 +145,7 @@ class TopBar(QWidget):
 
     back_clicked = Signal()
 
+
     def __init__(self, title: str, show_back: bool = False, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
@@ -137,17 +162,19 @@ class TopBar(QWidget):
             left_slot.setCursor(Qt.PointingHandCursor)
             left_slot.clicked.connect(self.back_clicked.emit)
 
-        title_lbl = QLabel(title)
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 16px; font-weight: 700;")
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setAlignment(Qt.AlignCenter)
+        self.title_lbl.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 16px; font-weight: 700;")
 
         right_spacer = QLabel("")
         right_spacer.setFixedSize(40, 40)
 
         layout.addWidget(left_slot)
-        layout.addWidget(title_lbl, 1)
+        layout.addWidget(self.title_lbl, 1)
         layout.addWidget(right_spacer)
 
+    def set_title(self, text: str):
+        self.title_lbl.setText(text)    
 
 # ------------------------------------------------------------------ Week strip
 class DayCell(QFrame):
@@ -557,7 +584,8 @@ class HabitRow(QFrame):
         self.header = QHBoxLayout()
         self.header.setSpacing(14)
 
-        self.avatar = QLabel(habit.icon)
+        self.avatar = QLabel()
+        self.avatar.setPixmap(res_icon(habit.icon).pixmap(40, 40))
         self.avatar.setFixedSize(66, 66)
         self.avatar.setAlignment(Qt.AlignCenter)
         f = QFont()
@@ -844,7 +872,8 @@ class AddHabitForm(QFrame):
     """
 
     submitted = Signal(dict)
-
+    icon_pick_requested = Signal()
+    
     def __init__(self, accent: str, parent=None):
         super().__init__(parent)
         self.setStyleSheet(
@@ -1031,8 +1060,13 @@ class AddHabitForm(QFrame):
             )
 
     def _open_icon_menu(self):
-        # TODO: здесь позже откроется меню выбора иконки привычки.
-        pass
+        self.icon_pick_requested.emit()
+
+    def set_icon(self, filename: str):
+        self.selected_icon = filename
+        self.icon_btn.setIcon(res_icon(filename))
+        self.icon_btn.setIconSize(QSize(28, 28))
+        self.icon_btn.setText("")
 
     def _on_reminder_toggled(self, checked: bool):
         if checked:
@@ -1070,6 +1104,7 @@ class AddHabitForm(QFrame):
     def reset(self):
         self.name_edit.clear()
         self.selected_icon = None
+        self.icon_btn.setIcon(QIcon())
         self.icon_btn.setText("?")
         self._select_period("day")
         self.target_spin.setValue(1)
@@ -1077,7 +1112,284 @@ class AddHabitForm(QFrame):
         self.reminder_btn.setChecked(False)
         self._select_color(MARK_COLORS[0])
 
+ICON_CATEGORIES = [
+    ("Здоровье", "icon_health.png"),
+    ("Образование и саморазвитие", "icon_education.png"),
+    ("Работа и продуктивность", "icon_work.png"),
+    ("Личное развитие", "icon_personal.png"),
+    ("Развлечения и игры", "icon_fun.png"),
+    ("Дом и быт", "icon_home.png"),
+]
 
+
+CATEGORY_SUBICONS = {
+    "Здоровье": [
+        ("Бег", "health_run.png"),
+        ("Ходьба", "health_walk.png"),
+        ("Велосипед", "health_bike.png"),
+        ("Плавание", "health_swim.png"),
+        ("Йога", "health_yoga.png"),
+        ("Спортзал", "health_gym.png"),
+        ("Здоровое питание", "health_food.png"),
+        ("Вода", "health_water.png"),
+        ("Сон", "health_sleep.png"),
+        ("Сердце", "health_heart.png"),
+        ("Зуб", "health_tooth.png"),
+        ("Гигиена", "health_hygiene.png"),
+        ("Осмотр", "health_checkup.png"),
+        ("Витамины и таблетки", "health_vitamins.png"),
+    ],
+    "Образование и саморазвитие": [
+        ("Книги", "edu_books.png"),
+        ("Учёба", "edu_study.png"),
+        ("Заметки", "edu_notes.png"),
+        ("География", "edu_geography.png"),
+        ("Иностранные языки", "edu_languages.png"),
+        ("Идея", "edu_idea.png"),
+        ("Головоломки", "edu_puzzles.png"),
+        ("Музыка", "edu_music.png"),
+        ("Рисование", "edu_drawing.png"),
+        ("Программиро-"
+        "вание", "edu_programming.png"),
+        ("Наушники", "edu_headphones.png"),
+    ],
+   "Работа и продуктивность": [
+        ("Ноутбук", "work_laptop.png"),
+        ("График", "work_chart.png"),
+        ("Календарь", "work_calendar.png"),
+        ("Клипборд", "work_clipboard.png"),
+        ("Будильник", "work_alarm.png"),
+        ("Скрепка", "work_paperclip.png"),
+        ("Встреча", "work_meeting.png"),
+        ("Кубок", "work_trophy.png"),
+        ("Звонки", "work_calls.png"),
+        ("Энергия", "work_energy.png"),
+        ("Папка", "work_folder.png"),
+        ("Письмо", "work_mail.png"),
+    ],
+    "Личное развитие": [
+        ("Звезда", "personal_star.png"),
+        ("Солнце", "personal_sun.png"),
+        ("Луна", "personal_moon.png"),
+        ("Голубь", "personal_dove.png"),
+        ("Огонь", "personal_fire.png"),
+        ("Растение", "personal_plant.png"),
+        ("Цветок", "personal_flower.png"),
+        ("Лотос", "personal_lotus.png"),
+        ("Молитва", "personal_prayer.png"),
+        ("Медитация", "personal_meditation.png"),
+        ("Маски", "personal_masks.png"),
+        ("Компас", "personal_compass.png"),
+        ("Ключ", "personal_key.png"),
+    ],
+    "Развлечения и игры": [
+        ("Джойстик", "entertainment_joystick.png"),
+        ("Кубики", "entertainment_dice.png"),
+        ("Шахматы", "entertainment_chess.png"),
+        ("Кино", "entertainment_movie.png"),
+        ("Караоке", "entertainment_karaoke.png"),
+        ("Телевизор", "entertainment_tv.png"),
+        ("Гитара", "entertainment_guitar.png"),
+        ("Пианино", "entertainment_piano.png"),
+        ("Баскетбол", "entertainment_basketball.png"),
+        ("Футбол", "entertainment_football.png"),
+        ("Волейбол", "entertainment_volleyball.png"),
+        ("Теннис", "entertainment_tennis.png"),
+        ("Дартс", "entertainment_darts.png"),
+        ("Игральные карты", "entertainment_cards.png"),
+    ],
+    "Дом и быт": [
+        ("Веник", "home_broom.png"),
+        ("Мыло", "home_soap.png"),
+        ("Швабра с ведром", "home_mop.png"),
+        ("Корзина с одеждой", "home_laundry.png"),
+        ("Тележка", "home_cart.png"),
+        ("Сковородка", "home_pan.png"),
+        ("Кастрюля", "home_pot.png"),
+        ("Инструменты", "home_tools.png"),
+        ("Зеркало", "home_mirror.png"),
+        ("Горшок с растением", "home_plant.png"),
+        ("Игрушки", "home_toys.png"),
+        ("Мусорное ведро", "home_trash.png"),
+        ("Котик", "home_cat.png"),
+        ("Собачка", "home_dog.png"),
+    ]
+}
+
+class FlowLayout(QLayout):
+    """Заворачивает виджеты на новую строку по ширине контейнера — как текст.
+    Убирает необходимость вручную считать число колонок под ширину окна."""
+
+    def __init__(self, parent=None, margin=0, h_spacing=12, v_spacing=12):
+        super().__init__(parent)
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+        self._items = []
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = _QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += _QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        left, top, right, bottom = self.getContentsMargins()
+        effective = rect.adjusted(left, top, -right, -bottom)
+        x, y = effective.x(), effective.y()
+        line_height = 0
+
+        for item in self._items:
+            item_size = item.sizeHint()
+            next_x = x + item_size.width() + self._h_spacing
+            if next_x - self._h_spacing > effective.right() and line_height > 0:
+                x = effective.x()
+                y = y + line_height + self._v_spacing
+                next_x = x + item_size.width() + self._h_spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item_size))
+            x = next_x
+            line_height = max(line_height, item_size.height())
+
+        return y + line_height - rect.y() + bottom
+    
+class IconPickerPage(QWidget):
+    """Экран «Выбор иконки»: сетка категорий → сетка иконок внутри категории."""
+
+    icon_chosen = Signal(str)
+
+    def __init__(self, mw: "MainWindow", parent=None):
+        super().__init__(parent)
+        self.mw = mw
+        self.current_category: Optional[str] = None
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background: transparent;")
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 14, 16, 12)
+        outer.setSpacing(16)
+
+        self.top = TopBar("Выбор иконки", show_back=True)
+        self.top.back_clicked.connect(self._on_back)
+        outer.addWidget(self.top)
+
+        self.chip = QLabel("")
+        self.chip.setStyleSheet(
+            "background-color: rgba(255,255,255,0.15); color: #ffffff; "
+            "font-size: 14px; font-weight: 700; border-radius: 16px; padding: 8px 16px;"
+        )
+        self.chip.setVisible(False)
+        outer.addWidget(self.chip, 0, Qt.AlignLeft)
+
+        self.grid_host = QWidget()
+        self.grid = FlowLayout(self.grid_host, margin=0, h_spacing=16, v_spacing=20)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        scroll.setWidget(self.grid_host)
+        hide_scrollbar(scroll)
+        outer.addWidget(scroll, 1)
+
+        self._show_categories()
+
+    
+
+    def _clear_grid(self):
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+    def _add_cell(self, filename: str, label_text: str, on_click, size: int = 64):
+        cell = QWidget()
+        cell.setFixedWidth(size + 40)
+        col = QVBoxLayout(cell)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+
+        btn = QPushButton()
+        btn.setFixedSize(size, size)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setIcon(QIcon(circular_icon_pixmap(filename, size)))
+        btn.setIconSize(QSize(size, size))
+        btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; }"
+        )
+        btn.clicked.connect(on_click)
+        col.addWidget(btn, 0, Qt.AlignHCenter)
+
+        lbl = QLabel()
+        lbl.setTextFormat(Qt.RichText)
+        lbl.setText(f'<div style="word-wrap: break-word;">{label_text}</div>')
+        lbl.setWordWrap(True)
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setFixedWidth(size + 40)
+        lbl.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 600;")
+        col.addWidget(lbl)
+
+        self.grid.addWidget(cell)
+    
+
+    def _show_categories(self):
+        self.current_category = None
+        self.chip.setVisible(False)
+        self.top.set_title("Выбор иконки")
+        self._clear_grid()
+        for name, filename in ICON_CATEGORIES:
+            self._add_cell(filename, name, lambda _=False, n=name: self._show_subicons(n), size=64)
+
+    def _show_subicons(self, category: str):
+        self.current_category = category
+        self.chip.setText(category)
+        self.chip.setVisible(True)
+        self._clear_grid()
+        items = CATEGORY_SUBICONS.get(category, [])
+        for name, filename in items:
+            self._add_cell(filename, name, lambda _=False, f=filename: self.icon_chosen.emit(f), size=64)
+
+    def _on_back(self):
+        if self.current_category is not None:
+            self._show_categories()
+        else:
+            self.mw.go_to_add_habit()
 # ------------------------------------------------------------------ Bottom nav
 class BottomNav(QFrame):
     """Нижняя навигация: домик / статистика / профиль.

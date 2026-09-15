@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from models import HabitStore, today
 from widgets import (
     TopBar, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
-    HabitRow, AddHabitForm, SettingsToggleRow, FontSizeRow,
+        HabitRow, AddHabitForm, SettingsToggleRow, FontSizeRow, IconPickerPage,
     BottomNav, primary_button, res_icon, hide_scrollbar,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
     COLOR_HABITS_CARD, COLOR_ADD_CARD, COLOR_HOME_CARD_BG,
@@ -33,6 +33,7 @@ IDX_HABITS = 2
 IDX_ADD_HABIT = 3
 IDX_REMINDERS = 4
 IDX_SETTINGS = 5
+IDX_ICON_PICKER = 6
 
 NAV_TABS = {IDX_HOME: 0, IDX_REMINDERS: 1, IDX_SETTINGS: 2}
 
@@ -327,6 +328,7 @@ class AddHabitPage(QWidget):
 
         self.form = AddHabitForm(COLOR_HABITS_CARD)
         self.form.submitted.connect(self.on_submit)
+        self.form.icon_pick_requested.connect(lambda: mw.go_to(IDX_ICON_PICKER))
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -449,10 +451,12 @@ class MainWindow(QMainWindow):
         self.add_habit_page = AddHabitPage(self.store, self)
         self.reminders_page = RemindersPage(self.store, self)
         self.settings_page = SettingsPage(self.store, self)
+        self.icon_picker_page = IconPickerPage(self)
+        self.icon_picker_page.icon_chosen.connect(self.on_icon_chosen)
 
         for page in (self.onboarding_page, self.home_page, self.habits_page,
                      self.add_habit_page, self.reminders_page,
-                     self.settings_page):
+                     self.settings_page, self.icon_picker_page):
             self.stack.addWidget(page)
 
         nav_wrap = QWidget()
@@ -468,6 +472,13 @@ class MainWindow(QMainWindow):
         else:
             self.stack.setCurrentIndex(IDX_ONBOARDING)
             self.nav_wrap.hide()
+
+    def go_to_add_habit(self):
+        self.go_to(IDX_ADD_HABIT)  
+              
+    def on_icon_chosen(self, emoji: str):
+        self.add_habit_page.form.set_icon(emoji)
+        self.go_to(IDX_ADD_HABIT)
 
     def on_name_submitted(self, name: str):
         self.store.set_name(name)

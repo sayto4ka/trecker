@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from models import HabitStore, today
 from widgets import (
-    TopBar, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
+    TopBar, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
         HabitRow, AddHabitForm, SettingsToggleRow, FontSizeRow, IconPickerPage,
     BottomNav, primary_button, res_icon, hide_scrollbar,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
@@ -34,8 +34,9 @@ IDX_ADD_HABIT = 3
 IDX_REMINDERS = 4
 IDX_SETTINGS = 5
 IDX_ICON_PICKER = 6
+IDX_STATS = 7
 
-NAV_TABS = {IDX_HOME: 0, IDX_REMINDERS: 1, IDX_SETTINGS: 2}
+NAV_TABS = {IDX_HOME: 0, IDX_STATS: 1, IDX_SETTINGS: 2}
 
 
 def load_custom_fonts():
@@ -453,10 +454,11 @@ class MainWindow(QMainWindow):
         self.settings_page = SettingsPage(self.store, self)
         self.icon_picker_page = IconPickerPage(self)
         self.icon_picker_page.icon_chosen.connect(self.on_icon_chosen)
+        self.stats_page = StatsPage(self.store, self)
 
         for page in (self.onboarding_page, self.home_page, self.habits_page,
                      self.add_habit_page, self.reminders_page,
-                     self.settings_page, self.icon_picker_page):
+                     self.settings_page, self.icon_picker_page, self.stats_page):
             self.stack.addWidget(page)
 
         nav_wrap = QWidget()
@@ -472,6 +474,9 @@ class MainWindow(QMainWindow):
         else:
             self.stack.setCurrentIndex(IDX_ONBOARDING)
             self.nav_wrap.hide()
+
+    def go_to_home(self):
+        self.go_to(IDX_HOME)
 
     def go_to_add_habit(self):
         self.go_to(IDX_ADD_HABIT)  
@@ -499,6 +504,8 @@ class MainWindow(QMainWindow):
             self.habits_page.refresh()
         elif idx == IDX_REMINDERS:
             self.reminders_page.refresh()
+        elif idx == IDX_STATS:
+            self.stats_page.refresh()
 
 
 def main():

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QSizePolicy
 )
 
-from models import Habit, HabitStore, WEEKDAYS_RU_SHORT, MONTHS_RU, THEME_COLORS, today, MARK_COLORS, PERIODS
+from models import Habit, HabitStore, WEEKDAYS_RU_SHORT, MONTHS_RU, THEME_COLORS, today, MARK_COLORS, PERIODS, str_to_date
 
 RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
 
@@ -60,6 +60,16 @@ def hide_scrollbar(scroll_area) -> None:
     scroll_area.verticalScrollBar().setStyleSheet(no_bar_qss)
     scroll_area.horizontalScrollBar().setStyleSheet(no_bar_qss)
 
+def subtle_scrollbar_qss() -> str:
+    """Тонкий, малозаметный скроллбар вместо нативного (с обрезанными стрелками OS)."""
+    return (
+        "QScrollBar:horizontal { height: 5px; background: transparent; margin: 0px; }"
+        "QScrollBar::handle:horizontal { background: rgba(255,255,255,0.18); border-radius: 2px; min-width: 24px; }"
+        "QScrollBar::handle:horizontal:hover { background: rgba(255,255,255,0.32); }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; border: none; background: transparent; }"
+        "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }"
+        "QScrollBar:vertical { width: 0px; background: transparent; }"
+    )
 
 def tinted_pixmap(filename: str, size: int, color: str) -> "QPixmap":
     """Перекрашивает силуэт PNG-иконки (сохраняя альфа-канал) в нужный цвет —
@@ -1390,6 +1400,488 @@ class IconPickerPage(QWidget):
             self._show_categories()
         else:
             self.mw.go_to_add_habit()
+
+# ------------------------------------------------------------------ Статистика: кольцо прогресса
+class RingProgress(QWidget):
+    """Кольцевой индикатор (донат) — прогресс дня, как в дизайне статистики."""
+
+    def __init__(self, percent: int, color: str = "#5D5FEF", size: int = 96, thickness: int = 10, parent=None):
+        super().__init__(parent)
+        self.percent = max(0, min(100, percent))
+        self.color = QColor(color)
+        self.thickness = thickness
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.thickness / 2, self.thickness / 2,
+                       self.width() - self.thickness, self.height() - self.thickness)
+        pen_bg = QPen(QColor(255, 255, 255, 20))
+        pen_bg.setWidth(self.thickness)
+        pen_bg.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen_bg)
+        painter.drawArc(rect, 0, 360 * 16)
+
+        pen_fg = QPen(self.color)
+        pen_fg.setWidth(self.thickness)
+        pen_fg.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen_fg)
+        span = int(360 * 16 * self.percent / 100)
+        painter.drawArc(rect, 90 * 16, -span)
+
+        painter.setPen(QColor("#ffffff"))
+        f = QFont()
+        f.setPointSize(14)
+        f.setBold(True)
+        painter.setFont(f)
+        painter.drawText(self.rect(), Qt.AlignCenter, f"{self.percent}%")
+
+
+# ------------------------------------------------------------------ Статистика: карточки
+def _stat_tile(value: str, label: str, delta: str, delta_kind: str = "up") -> QFrame:
+    tile = QFrame()
+    tile.setStyleSheet(
+        "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; } "
+        "QLabel { background: transparent; border: none; }"
+    )
+    lay = QVBoxLayout(tile)
+    lay.setContentsMargins(14, 14, 14, 14)
+    lay.setSpacing(4)
+
+    v = QLabel(value)
+    v.setStyleSheet("color: #ffffff; font-size: 26px; font-weight: 800;")
+    lay.addWidget(v)
+
+    l = QLabel(label)
+    l.setStyleSheet("color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 600;")
+    lay.addWidget(l)
+
+    colors = {"up": "#34c471", "down": "#ff6b5e", "neutral": "rgba(255,255,255,0.4)"}
+    d = QLabel(delta)
+    d.setStyleSheet(f"color: {colors.get(delta_kind, colors['up'])}; font-size: 11px; font-weight: 700;")
+    lay.addWidget(d)
+
+    return tile
+
+
+class BarChartCard(QFrame):
+    """Столбчатый график активности — высота столбцов пропорциональна значению (0-100)."""
+
+    def __init__(self, title: str, subtitle: str, labels: list, values: list,
+                 highlight_index: Optional[int] = None, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; } "
+            "QLabel { background: transparent; border: none; }"
+        )
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(14)
+
+        head = QHBoxLayout()
+        h4 = QLabel(title)
+        h4.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 700;")
+        head.addWidget(h4)
+        head.addStretch()
+        sub = QLabel(subtitle)
+        sub.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; font-weight: 600;")
+        head.addWidget(sub)
+        outer.addLayout(head)
+
+        chart_h = 130
+        min_bar_col = 34 if len(values) <= 12 else 30
+
+        bars_host = QWidget()
+        bars_row = QHBoxLayout(bars_host)
+        bars_row.setSpacing(6)
+
+        for i, (label, val) in enumerate(zip(labels, values)):
+            col = QVBoxLayout()
+            col.setSpacing(6)
+            col.addStretch()
+            bar = QFrame()
+            bar.setFixedHeight(max(4, round(chart_h * val / 100)))
+            bar.setMinimumWidth(10)
+            bar.setMaximumWidth(40)
+            color = "#B9AEDD" if i == highlight_index else "#5D5FEF"
+            bar.setStyleSheet(f"background-color: {color}; border-radius: 6px;")
+            col.addWidget(bar)
+            lbl = QLabel(label)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setWordWrap(False)
+            lbl.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 10px; font-weight: 600;")
+            col.addWidget(lbl)
+            col_widget = QWidget()
+            col_widget.setLayout(col)
+            col_widget.setFixedHeight(chart_h + 20)
+            col_widget.setMinimumWidth(min_bar_col)
+            bars_row.addWidget(col_widget, 1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }" + subtle_scrollbar_qss())
+        scroll.setWidget(bars_host)
+        scroll.setFixedHeight(chart_h + 36)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        outer.addWidget(scroll)
+
+
+class HeatmapCard(QFrame):
+    """Тепловая карта активности за N недель (14x7 ячеек по умолчанию)."""
+
+    LEVEL_COLORS = [
+        "rgba(255,255,255,0.06)", "rgba(93,95,239,0.25)",
+        "rgba(93,95,239,0.5)", "rgba(93,95,239,0.75)", "#5D5FEF",
+    ]
+
+    def __init__(self, levels: list, weeks: int, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; } "
+            "QLabel { background: transparent; border: none; }"
+        )
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(12)
+
+        head = QHBoxLayout()
+        h4 = QLabel("Активность")
+        h4.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 700;")
+        head.addWidget(h4)
+        head.addStretch()
+        sub = QLabel(f"последние {weeks} недель")
+        sub.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; font-weight: 600;")
+        head.addWidget(sub)
+        outer.addLayout(head)
+
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        for week in range(weeks):
+            for day in range(7):
+                lvl = levels[week][day] if week < len(levels) and day < len(levels[week]) else 0
+                cell = QFrame()
+                cell.setFixedSize(14, 14)
+                cell.setStyleSheet(
+                    f"background-color: {self.LEVEL_COLORS[lvl]}; border-radius: 3px;"
+                )
+                grid.addWidget(cell, day, week)
+        outer.addLayout(grid)
+
+        legend = QHBoxLayout()
+        legend.addStretch()
+        less = QLabel("меньше")
+        less.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 600;")
+        legend.addWidget(less)
+        for color in self.LEVEL_COLORS:
+            i = QFrame()
+            i.setFixedSize(10, 10)
+            i.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
+            legend.addWidget(i)
+        more = QLabel("больше")
+        more.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 600;")
+        legend.addWidget(more)
+        outer.addLayout(legend)
+
+
+class HabitStatRow(QFrame):
+    """Строка статистики по одной привычке — иконка, серия, прогресс-бар %."""
+
+    def __init__(self, habit: Habit, percent: int, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; } "
+            "QLabel { background: transparent; border: none; }"
+        )
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(14, 12, 14, 12)
+        outer.setSpacing(12)
+
+        icon = QLabel()
+        icon.setPixmap(res_icon(habit.icon).pixmap(22, 22))
+        icon.setFixedSize(40, 40)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setStyleSheet("background-color: #d9d9d9; border-radius: 20px;")
+        outer.addWidget(icon)
+
+        info = QVBoxLayout()
+        info.setSpacing(2)
+        name = QLabel(habit.name)
+        name.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 700;")
+        info.addWidget(name)
+        sub = QLabel(f"Серия 🔥 {habit.current_streak()} · {len(habit.completions)} дней")
+        sub.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 11px; font-weight: 600;")
+        info.addWidget(sub)
+
+        bar_bg = QFrame()
+        bar_bg.setFixedHeight(4)
+        bar_bg.setStyleSheet("background-color: rgba(255,255,255,0.08); border-radius: 2px;")
+        bar_bg_layout = QHBoxLayout(bar_bg)
+        bar_bg_layout.setContentsMargins(0, 0, 0, 0)
+        bar_bg_layout.addStretch(max(0, 100 - percent))
+        fill = QFrame()
+        fill.setStyleSheet(f"background-color: {habit.color}; border-radius: 2px;")
+        bar_bg_layout.insertWidget(0, fill, percent)
+        info.addWidget(bar_bg)
+        outer.addLayout(info, 1)
+
+        pct = QLabel(f"{percent}%")
+        pct.setStyleSheet("color: #ffffff; font-size: 16px; font-weight: 800;")
+        outer.addWidget(pct)
+
+
+# ------------------------------------------------------------------ Экран «Статистика»
+class StatsPage(QWidget):
+    """Экран статистики — открывается по нижней навигации (иконка графика)."""
+
+    def __init__(self, store: HabitStore, mw: "MainWindow", parent=None):
+        super().__init__(parent)
+        self.store = store
+        self.mw = mw
+        self.period = "week"
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 14, 16, 0)
+        outer.setSpacing(14)
+
+        top = TopBar("Статистика", show_back=True)
+        top.back_clicked.connect(lambda: mw.go_to_home())
+        outer.addWidget(top)
+
+        switch_row = QHBoxLayout()
+        switch_row.setContentsMargins(4, 4, 4, 4)
+        switch_row.setSpacing(4)
+        switch_frame = QFrame()
+        switch_frame.setStyleSheet(
+            "QFrame { background-color: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); "
+            "border-radius: 14px; }"
+        )
+        switch_layout = QHBoxLayout(switch_frame)
+        switch_layout.setContentsMargins(4, 4, 4, 4)
+        switch_layout.setSpacing(4)
+        self.period_buttons = {}
+        for key, text in (("week", "Неделя"), ("month", "Месяц"), ("year", "Год")):
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setFixedHeight(30)
+            b.clicked.connect(lambda _, k=key: self._select_period(k))
+            switch_layout.addWidget(b)
+            self.period_buttons[key] = b
+        outer.addWidget(switch_frame)
+
+        self.content_host = QWidget()
+        self.content_layout = QVBoxLayout(self.content_host)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(14)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        scroll.setWidget(self.content_host)
+        hide_scrollbar(scroll)
+        outer.addWidget(scroll, 1)
+
+        self._select_period("week")
+
+    def refresh(self):
+        self._select_period(self.period)
+
+    def _select_period(self, period: str):
+        self.period = period
+        for key, b in self.period_buttons.items():
+            selected = key == period
+            b.setChecked(selected)
+            b.setStyleSheet(
+                "QPushButton { background-color: %s; color: %s; border: none; border-radius: 10px; "
+                "font-size: 12px; font-weight: 700; }" % (
+                    "#5D5FEF" if selected else "transparent",
+                    "#ffffff" if selected else "rgba(255,255,255,0.55)",
+                )
+            )
+        self._rebuild()
+
+    def _clear_content(self):
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            self._clear_item(item)
+
+    def _clear_item(self, item):
+        w = item.widget()
+        if w:
+            w.deleteLater()
+            return
+        layout = item.layout()
+        if layout:
+            while layout.count():
+                self._clear_item(layout.takeAt(0))
+            layout.deleteLater()
+
+    def _rebuild(self):
+        self._clear_content()
+        store = self.store
+        t = today()
+        days_map = {"week": 7, "month": 30, "year": 365}
+        days = days_map[self.period]
+
+        # ---------- сводка 2x2 ----------
+        rate = self._completion_rate(days)
+        best_streak = max((h.current_streak() for h in store.habits), default=0)
+        active = len(store.habits)
+        marks = sum(1 for h in store.habits for k in h.completions if str_to_date(k) >= t - timedelta(days=days - 1))
+
+        summary = QGridLayout()
+        summary.setSpacing(10)
+        summary.addWidget(_stat_tile(f"{round(rate)}%", "Выполнено", "▲ за период"), 0, 0)
+        summary.addWidget(_stat_tile(str(best_streak), "Лучшая серия", "🔥 дней подряд"), 0, 1)
+        summary.addWidget(_stat_tile(str(active), "Активных", "привычек"), 1, 0)
+        summary.addWidget(_stat_tile(str(marks), "Отметок", "за период"), 1, 1)
+        summary.setColumnStretch(0, 1)
+        summary.setColumnStretch(1, 1)
+        self.content_layout.addLayout(summary)
+
+        # ---------- график ----------
+        labels, values, hl = self._chart_data()
+        self.content_layout.addWidget(BarChartCard("Активность", self._chart_subtitle(), labels, values, hl))
+
+        # ---------- кольцо прогресса дня ----------
+        today_habits = [h for h in store.habits if str_to_date(h.created) <= t]
+        today_done = sum(1 for h in today_habits if h.is_done(t))
+        today_pct = round(today_done / len(today_habits) * 100) if today_habits else 0
+        ring_card = QFrame()
+        ring_card.setStyleSheet(
+            "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; } "
+            "QLabel { background: transparent; border: none; }"
+        )
+        ring_layout = QHBoxLayout(ring_card)
+        ring_layout.setContentsMargins(16, 16, 16, 16)
+        ring_layout.setSpacing(18)
+        ring_layout.addWidget(RingProgress(today_pct, color="#5D5FEF"))
+        ring_info = QVBoxLayout()
+        ring_info.setSpacing(4)
+        ring_title = QLabel("Прогресс дня")
+        ring_title.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 700;")
+        ring_info.addWidget(ring_title)
+        ring_text = QLabel(f"Выполнено {today_done} из {len(today_habits)} запланированных привычек.")
+        ring_text.setWordWrap(True)
+        ring_text.setStyleSheet("color: rgba(255,255,255,0.55); font-size: 12px;")
+        ring_info.addWidget(ring_text)
+        ring_layout.addLayout(ring_info, 1)
+        self.content_layout.addWidget(ring_card)
+
+        # ---------- тепловая карта ----------
+        self.content_layout.addWidget(HeatmapCard(self._heatmap_levels(), weeks=14))
+
+        # ---------- по привычкам ----------
+        section = QLabel("По привычкам")
+        section.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 700;")
+        self.content_layout.addWidget(section)
+        for h in store.habits:
+            created = str_to_date(h.created)
+            start = max(t - timedelta(days=days - 1), created)
+            span = (t - start).days + 1
+            done = sum(1 for i in range(span) if h.is_done(start + timedelta(days=i)))
+            pct = round(done / span * 100) if span else 0
+            self.content_layout.addWidget(HabitStatRow(h, pct))
+
+        self.content_layout.addStretch()
+
+    def _completion_rate(self, days: int) -> float:
+        store = self.store
+        t = today()
+        if not store.habits:
+            return 0.0
+        total = done = 0
+        for h in store.habits:
+            created = str_to_date(h.created)
+            start = max(t - timedelta(days=days - 1), created)
+            span = (t - start).days + 1
+            if span <= 0:
+                continue
+            total += span
+            done += sum(1 for i in range(span) if h.is_done(start + timedelta(days=i)))
+        return (done / total * 100) if total else 0.0
+
+    def _chart_subtitle(self) -> str:
+        return {"week": "Пн–Вс", "month": "4 недели", "year": "Янв–Дек"}[self.period]
+
+    def _chart_data(self):
+        store = self.store
+        t = today()
+        if self.period == "week":
+            dates = store.week_dates()
+            labels = [WEEKDAYS_RU_SHORT[d.weekday()] for d in dates]
+            values = []
+            for d in dates:
+                active = [h for h in store.habits if str_to_date(h.created) <= d]
+                values.append(round(sum(1 for h in active if h.is_done(d)) / len(active) * 100) if active else 0)
+            hl = dates.index(t) if t in dates else None
+            return labels, values, hl
+        if self.period == "month":
+            labels, values = [], []
+            for w in range(3, -1, -1):
+                w_start = t - timedelta(days=t.weekday() + 7 * w)
+                w_end = w_start + timedelta(days=6)
+                active = [h for h in store.habits if str_to_date(h.created) <= w_end]
+                total = done = 0
+                for h in active:
+                    for i in range(7):
+                        d = w_start + timedelta(days=i)
+                        if d > t or str_to_date(h.created) > d:
+                            continue
+                        total += 1
+                        done += 1 if h.is_done(d) else 0
+                values.append(round(done / total * 100) if total else 0)
+                labels.append(f"Н{4 - w}")
+            return labels, values, len(values) - 1
+        # year
+        labels, values = [], []
+        for m in range(12):
+            month_num = m + 1
+            active = [h for h in store.habits if str_to_date(h.created).year <= t.year
+                      and (str_to_date(h.created).year < t.year or str_to_date(h.created).month <= month_num)]
+            total = done = 0
+            days_in_month = calendar.monthrange(t.year, month_num)[1]
+            for h in active:
+                for day in range(1, days_in_month + 1):
+                    d = date(t.year, month_num, day)
+                    if d > t or str_to_date(h.created) > d:
+                        continue
+                    total += 1
+                    done += 1 if h.is_done(d) else 0
+            values.append(round(done / total * 100) if total else 0)
+            labels.append(MONTHS_RU[m][:3])
+        return labels, values, t.month - 1
+
+    def _heatmap_levels(self):
+        store = self.store
+        t = today()
+        levels = []
+        for week in range(13, -1, -1):
+            week_levels = []
+            for day in range(7):
+                d = t - timedelta(days=week * 7 + (6 - day))
+                active = [h for h in store.habits if str_to_date(h.created) <= d]
+                if not active or d > t:
+                    week_levels.append(0)
+                    continue
+                rate = sum(1 for h in active if h.is_done(d)) / len(active)
+                if rate <= 0:
+                    lvl = 0
+                elif rate < 0.25:
+                    lvl = 1
+                elif rate < 0.5:
+                    lvl = 2
+                elif rate < 0.75:
+                    lvl = 3
+                else:
+                    lvl = 4
+                week_levels.append(lvl)
+            levels.append(week_levels)
+        return levels
+
 # ------------------------------------------------------------------ Bottom nav
 class BottomNav(QFrame):
     """Нижняя навигация: домик / статистика / профиль.
@@ -1430,7 +1922,7 @@ class BottomNav(QFrame):
             "QPushButton { background-color: transparent; border-radius: 14px; }"
             "QPushButton:checked { background-color: rgba(0,0,0,0.12); }"
         )
-        stats_btn.clicked.connect(lambda: self.on_select(4))
+        stats_btn.clicked.connect(lambda: self.on_select(7))
         layout.addWidget(stats_btn)
         self.buttons.append(stats_btn)
         layout.addStretch()

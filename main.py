@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from models import HabitStore, today
 from widgets import (
-    TopBar, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
+    TopBar, CalendarPage, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
         HabitRow, AddHabitForm, SettingsToggleRow, FontSizeRow, IconPickerPage,
     BottomNav, primary_button, res_icon, hide_scrollbar,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
@@ -35,6 +35,7 @@ IDX_REMINDERS = 4
 IDX_SETTINGS = 5
 IDX_ICON_PICKER = 6
 IDX_STATS = 7
+IDX_CALENDAR = 8
 
 NAV_TABS = {IDX_HOME: 0, IDX_STATS: 1, IDX_SETTINGS: 2}
 
@@ -201,8 +202,7 @@ class HomePage(QWidget):
         self.refresh()
 
     def on_month_clicked(self):
-        # Календарь на весь месяц будет добавлен отдельным экраном позже.
-        pass
+        self.mw.go_to(IDX_CALENDAR)
 
     def refresh(self):
         name = self.store.settings.get("name") or "Друг"
@@ -455,10 +455,12 @@ class MainWindow(QMainWindow):
         self.icon_picker_page = IconPickerPage(self)
         self.icon_picker_page.icon_chosen.connect(self.on_icon_chosen)
         self.stats_page = StatsPage(self.store, self)
+        self.calendar_page = CalendarPage(self.store, self)
 
         for page in (self.onboarding_page, self.home_page, self.habits_page,
-                     self.add_habit_page, self.reminders_page,
-                     self.settings_page, self.icon_picker_page, self.stats_page):
+                    self.add_habit_page, self.reminders_page,
+                    self.settings_page, self.icon_picker_page, self.stats_page,
+                    self.calendar_page):
             self.stack.addWidget(page)
 
         nav_wrap = QWidget()
@@ -506,6 +508,8 @@ class MainWindow(QMainWindow):
             self.reminders_page.refresh()
         elif idx == IDX_STATS:
             self.stats_page.refresh()
+        elif idx == IDX_CALENDAR:
+            self.calendar_page.refresh()
 
 
 def main():

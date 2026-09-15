@@ -1882,6 +1882,252 @@ class StatsPage(QWidget):
             levels.append(week_levels)
         return levels
 
+class _CalendarHeaderStack(QWidget):
+    """Красная шапка с 'гнёздами' под скобы, как в оригинальном макете.
+    Пины/гнёзда — оверлей поверх self.card, пересчитывается в resizeEvent,
+    растяжение окна не задето."""
+
+    PIN_W, PIN_H = 46, 88
+    PIN_X_FRAC = (0.267, 0.771)   # центр пина, доля от ширины карточки
+    SOCKET_D = 55
+    SOCKET_TOP = 8                # от верха card
+    TOP_MARGIN = 34                # место над card, куда вылезают пины
+
+    def __init__(self, card: QWidget, parent=None):
+        super().__init__(parent)
+        self.card = card
+        self.card.setParent(self)
+
+        self.sockets = []
+        self.pins = []
+        for _ in range(2):
+            socket = QFrame(self)
+            socket.setFixedSize(self.SOCKET_D, self.SOCKET_D)
+            socket.setStyleSheet(
+                f"background-color: #b93e3e; border-radius: {self.SOCKET_D // 2}px;"
+            )
+            self.sockets.append(socket)
+
+            pin = QFrame(self)
+            pin.setFixedSize(self.PIN_W, self.PIN_H)
+            pin.setStyleSheet(
+                f"background-color: #d9d9d9; border-radius: {self.PIN_W // 2}px;"
+            )
+            self.pins.append(pin)
+
+        self.card.raise_()
+        for s in self.sockets:
+            s.raise_()
+        for p in self.pins:
+            p.raise_()
+
+    def resizeEvent(self, event):
+        w, h = self.width(), self.height()
+        self.card.setGeometry(0, self.TOP_MARGIN, w, h - self.TOP_MARGIN)
+
+        for socket, pin, frac in zip(self.sockets, self.pins, self.PIN_X_FRAC):
+            cx = int(w * frac)
+            socket.move(cx - self.SOCKET_D // 2, self.TOP_MARGIN + self.SOCKET_TOP)
+            pin.move(cx - self.PIN_W // 2, 0)
+            socket.raise_()
+            pin.raise_()
+        self.card.raise_()
+        for socket, pin in zip(self.sockets, self.pins):
+            socket.raise_()
+            pin.raise_()
+        super().resizeEvent(event)
+
+    def sizeHint(self):
+        return self.card.sizeHint() + QSize(0, self.TOP_MARGIN)
+
+# ------------------------------------------------------------------ Экран «Календарь»
+class CalendarPage(QWidget):
+    """Полноэкранный календарь месяца — открывается по клику на название месяца
+    в WeekStrip на главном экране."""
+
+    def __init__(self, store: HabitStore, mw: "MainWindow", parent=None):
+        super().__init__(parent)
+        self.store = store
+        self.mw = mw
+        t = today()
+        self.view_year = t.year
+        self.view_month = t.month
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 14, 16, 0)
+        outer.setSpacing(14)
+
+        top = TopBar("Календарь", show_back=True)
+        top.back_clicked.connect(lambda: mw.go_to_home())
+        outer.addWidget(top)
+
+        self.card = QFrame()
+        self.card.setStyleSheet("QFrame { background-color: #ffffff; border-radius: 30px; }")
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(0, 0, 0, 18)
+        card_layout.setSpacing(0)
+
+        header = QFrame()
+        header.setFixedHeight(87)
+        header.setStyleSheet(
+            "QFrame { background-color: #e64646; border-top-left-radius: 30px; border-top-right-radius: 30px; }"
+        )
+        card_layout.addWidget(header)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(20, 16, 20, 0)
+        body.setSpacing(10)
+
+        nav_row = QHBoxLayout()
+        self.month_year_lbl = QLabel()
+        self.month_year_lbl.setStyleSheet("color: #000000; font-size: 22px; font-weight: 800;")
+        nav_row.addWidget(self.month_year_lbl)
+        nav_row.addStretch()
+        for symbol, delta in (("◀", -1), ("▶", 1)):
+            btn = QPushButton(symbol)
+            btn.setFixedSize(36, 36)
+            btn.setCursor(Qt.PointingHandCursor)
+            f = QFont()
+            f.setPointSize(16)
+            f.setBold(True)
+            btn.setFont(f)
+            btn.setStyleSheet(
+                "QPushButton { background-color: #d9d9d9; border-radius: 18px; border: none; color: #000000; "
+                "padding-bottom: 3px; } "
+                "QPushButton:hover { background-color: #cfcfcf; }"
+            )
+            btn.clicked.connect(lambda _, d=delta: self._shift_month(d))
+            nav_row.addWidget(btn)
+        body.addLayout(nav_row)
+
+        self.month_strip_host = QWidget()
+        self.month_strip_layout = QHBoxLayout(self.month_strip_host)
+        self.month_strip_layout.setContentsMargins(0, 0, 0, 0)
+        self.month_strip_layout.setSpacing(6)
+        strip_scroll = QScrollArea()
+        strip_scroll.setWidgetResizable(True)
+        strip_scroll.setFrameShape(QFrame.NoFrame)
+        strip_scroll.setFixedHeight(38)
+        strip_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        strip_scroll.setWidget(self.month_strip_host)
+        hide_scrollbar(strip_scroll)
+        body.addWidget(strip_scroll)
+
+        weekday_row = QHBoxLayout()
+        weekday_row.setSpacing(0)
+        for wd in WEEKDAYS_RU_SHORT:
+            lbl = QLabel(wd)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet("color: #000000; font-size: 12px;")
+            weekday_row.addWidget(lbl, 1)
+        body.addLayout(weekday_row)
+
+        self.days_grid = QGridLayout()
+        self.days_grid.setSpacing(6)
+        for c in range(7):
+            self.days_grid.setColumnStretch(c, 1)
+        body.addLayout(self.days_grid)
+
+        card_layout.addLayout(body)
+
+        self.header_stack = _CalendarHeaderStack(self.card)
+        outer.addWidget(self.header_stack)
+        outer.addStretch()
+        outer.addStretch()
+
+        self._rebuild()
+
+    def _shift_month(self, delta: int):
+        m = self.view_month + delta
+        y = self.view_year
+        if m < 1:
+            m, y = 12, y - 1
+        elif m > 12:
+            m, y = 1, y + 1
+        self.view_month, self.view_year = m, y
+        self._rebuild()
+
+    def _select_month(self, month_num: int, year: int):
+        self.view_month = month_num
+        self.view_year = year
+        self._rebuild()
+
+    def refresh(self):
+        t = today()
+        self.view_year, self.view_month = t.year, t.month
+        self._rebuild()
+
+    def _rebuild(self):
+        self.month_year_lbl.setText(f"{MONTHS_RU[self.view_month - 1]}   {self.view_year}")
+        self._rebuild_month_strip()
+        self._rebuild_days()
+
+    def _rebuild_month_strip(self):
+        while self.month_strip_layout.count():
+            item = self.month_strip_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        for offset in range(-3, 5):
+            idx = self.view_month - 1 + offset
+            y = self.view_year + idx // 12
+            m = idx % 12 + 1
+            selected = offset == 0
+            btn = QPushButton(MONTHS_RU[m - 1][:3])
+            btn.setFixedHeight(30)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton { background-color: %s; color: #000000; border: none; border-radius: 10px; "
+                "font-size: 12px; font-weight: %s; padding: 0 10px; }" % (
+                    "#d9d9d9" if selected else "transparent",
+                    "700" if selected else "400",
+                )
+            )
+            btn.clicked.connect(lambda _, mm=m, yy=y: self._select_month(mm, yy))
+            self.month_strip_layout.addWidget(btn)
+
+    def _rebuild_days(self):
+        while self.days_grid.count():
+            item = self.days_grid.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        t = today()
+        first = date(self.view_year, self.view_month, 1)
+        days_in_month = calendar.monthrange(self.view_year, self.view_month)[1]
+        lead = first.weekday()
+
+        prev_month = self.view_month - 1 or 12
+        prev_year = self.view_year if self.view_month > 1 else self.view_year - 1
+        prev_days = calendar.monthrange(prev_year, prev_month)[1]
+
+        cells = [(prev_days - lead + 1 + i, False, None) for i in range(lead)]
+        for day in range(1, days_in_month + 1):
+            cells.append((day, True, date(self.view_year, self.view_month, day)))
+        next_num = 1
+        while len(cells) % 7 != 0:
+            cells.append((next_num, False, None))
+            next_num += 1
+
+        for idx, (day_num, in_month, d) in enumerate(cells):
+            r, c = divmod(idx, 7)
+            cell = QVBoxLayout()
+            cell.setSpacing(2)
+
+            is_today = in_month and d == t
+            num_lbl = QLabel(str(day_num))
+            num_lbl.setAlignment(Qt.AlignCenter)
+            color = "#000000" if in_month else "#0000004c"
+            extra = "background-color: #A7A1A1; border-radius: 10px;" if is_today else ""
+            num_lbl.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: 700; {extra}")
+            num_lbl.setFixedHeight(30)
+            cell.addWidget(num_lbl)
+
+            wrapper = QWidget()
+            wrapper.setLayout(cell)
+            self.days_grid.addWidget(wrapper, r, c)
+
 # ------------------------------------------------------------------ Bottom nav
 class BottomNav(QFrame):
     """Нижняя навигация: домик / статистика / профиль.
@@ -1896,7 +2142,7 @@ class BottomNav(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(18, 0, 18, 0)
         self.buttons = []
-        # домик (image "home-fill.svg" в макете)
+        # домик 
         home_btn = QPushButton()
         home_btn.setIcon(res_icon("home_icon.png"))
         home_btn.setIconSize(QSize(22, 22))
@@ -1912,7 +2158,7 @@ class BottomNav(QFrame):
 
         layout.addStretch()
 
-        # график/статистика (средняя иконка панели)
+        # статистика (средняя иконка панели)
         stats_btn = QPushButton()
         stats_btn.setIcon(res_icon("stats_icon.png"))
         stats_btn.setIconSize(QSize(22, 22))
@@ -1927,7 +2173,7 @@ class BottomNav(QFrame):
         self.buttons.append(stats_btn)
         layout.addStretch()
 
-        # человечек (image "person.svg" в макете)
+        # человек
         person_btn = QPushButton()
         person_btn.setIcon(res_icon("person_icon.png"))
         person_btn.setIconSize(QSize(22, 22))

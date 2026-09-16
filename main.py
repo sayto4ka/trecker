@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QStyle,
 )
 
-from models import HabitStore, today, date_to_str
+from models import HabitStore, today, date_to_str, FONT_SCALES
 from widgets import (
     TopBar, ProfilePage, CalendarPage, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
         HabitRow, AddHabitForm, SettingsPillRow, FontSizeExpander, HelpRow, IconPickerPage,
-    BottomNav, primary_button, res_icon, hide_scrollbar,
+    BottomNav, primary_button, res_icon, set_font_scale, hide_scrollbar,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
     COLOR_HABITS_CARD, COLOR_ADD_CARD, COLOR_HOME_CARD_BG,
 )
@@ -423,7 +423,7 @@ class SettingsPage(QWidget):
         outer.addWidget(self.notif_row)
 
         self.font_row = FontSizeExpander(store.settings.get("font_size", "M"))
-        self.font_row.changed.connect(store.set_font_size)
+        self.font_row.changed.connect(self._on_font_size_changed)
         outer.addWidget(self.font_row)
 
         help_title = QLabel("ПОМОЩЬ")
@@ -447,6 +447,10 @@ class SettingsPage(QWidget):
     def _open_about(self):
         QMessageBox.information(self, "О приложении", "Трекер привычек\nВерсия 1.0")
 
+    def _on_font_size_changed(self, size: str):
+        self.store.set_font_size(size)
+        self.mw.apply_font_scale()
+
 
 # ------------------------------------------------------------------ Главное окно
 class MainWindow(QMainWindow):
@@ -456,6 +460,7 @@ class MainWindow(QMainWindow):
         self.resize(390, 740)
         self.store = HabitStore()
         self.fonts = load_custom_fonts()
+        set_font_scale(FONT_SCALES.get(self.store.settings.get("font_size", "M"), 1.0))
         self.setStyleSheet(f"QMainWindow {{ background-color: {COLOR_APP_BG}; }}")
 
         central = QWidget()
@@ -468,23 +473,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         root.addWidget(self.stack, 1)
 
-        self.onboarding_page = OnboardingPage(self.on_name_submitted, self.fonts)
-        self.home_page = HomePage(self.store, self)
-        self.habits_page = HabitsPage(self.store, self)
-        self.add_habit_page = AddHabitPage(self.store, self)
-        self.reminders_page = RemindersPage(self.store, self)
-        self.settings_page = SettingsPage(self.store, self)
-        self.icon_picker_page = IconPickerPage(self)
-        self.icon_picker_page.icon_chosen.connect(self.on_icon_chosen)
-        self.stats_page = StatsPage(self.store, self)
-        self.calendar_page = CalendarPage(self.store, self)
-        self.profile_page = ProfilePage(self.store, self)
-
-        for page in (self.onboarding_page, self.home_page, self.habits_page,
-                    self.add_habit_page, self.reminders_page,
-                    self.settings_page, self.icon_picker_page, self.stats_page,
-                    self.calendar_page, self.profile_page):
-            self.stack.addWidget(page)
+        self._build_pages()
 
         # ---------- системные уведомления (Windows toast через трей) ----------
         self._notified = set()  # (habit_id, дата) — чтобы уведомление всплыло ровно один раз
@@ -513,6 +502,35 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(IDX_ONBOARDING)
             self.nav_wrap.hide()
 
+    def _build_pages(self):
+        self.onboarding_page = OnboardingPage(self.on_name_submitted, self.fonts)
+        self.home_page = HomePage(self.store, self)
+        self.habits_page = HabitsPage(self.store, self)
+        self.add_habit_page = AddHabitPage(self.store, self)
+        self.reminders_page = RemindersPage(self.store, self)
+        self.settings_page = SettingsPage(self.store, self)
+        self.icon_picker_page = IconPickerPage(self)
+        self.icon_picker_page.icon_chosen.connect(self.on_icon_chosen)
+        self.stats_page = StatsPage(self.store, self)
+        self.calendar_page = CalendarPage(self.store, self)
+        self.profile_page = ProfilePage(self.store, self)
+        for page in (self.onboarding_page, self.home_page, self.habits_page,
+                    self.add_habit_page, self.reminders_page,
+                    self.settings_page, self.icon_picker_page, self.stats_page,
+                    self.calendar_page, self.profile_page):
+            self.stack.addWidget(page)
+
+    def apply_font_scale(self):
+        set_font_scale(FONT_SCALES.get(self.store.settings.get("font_size", "M"), 1.0))
+        current_idx = self.stack.currentIndex()
+        while self.stack.count():
+            w = self.stack.widget(0)
+            self.stack.removeWidget(w)
+            w.deleteLater()
+        self._build_pages()
+        self.go_to(current_idx)
+
+    
     def go_to_home(self):
         self.go_to(IDX_HOME)
 

@@ -3,6 +3,7 @@ widgets.py — переиспользуемые виджеты нового ди
 """
 from __future__ import annotations
 
+import re
 import os
 import calendar
 from datetime import date, timedelta
@@ -38,7 +39,23 @@ COLOR_ADD_CARD = "#B9AEDD"
 COLOR_HOME_CARD_BG = "#272732"   # фон обеих карточек на главном экране (новый тёмный дизайн)
 
 ICON_CHOICES = ["⭐", "💧", "🏃", "📖", "🧘", "🍎", "😴", "💊", "✍️", "🎯", "🚭", "💪"]
+FONT_SCALE = 1.0
+_FONT_SIZE_RE = re.compile(r"font-size:\s*(\d+)px")
+_orig_set_style_sheet = QWidget.setStyleSheet
 
+
+def _scaled_set_style_sheet(self, css: str):
+    if css:
+        css = _FONT_SIZE_RE.sub(lambda m: f"font-size:{max(1, round(int(m.group(1)) * FONT_SCALE))}px", css)
+    _orig_set_style_sheet(self, css)
+
+
+QWidget.setStyleSheet = _scaled_set_style_sheet
+
+
+def set_font_scale(scale: float):
+    global FONT_SCALE
+    FONT_SCALE = scale
 
 def res_icon(filename: str) -> QIcon:
     return QIcon(os.path.join(RESOURCES_DIR, filename))

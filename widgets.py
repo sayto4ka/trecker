@@ -860,7 +860,7 @@ class SettingsPillRow(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(
-            "QFrame { background-color: #ffffff; border-radius: 14px; } "
+            "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; } "
             "QLabel { background: transparent; border: none; }"
         )
         layout = QHBoxLayout(self)
@@ -868,7 +868,7 @@ class SettingsPillRow(QFrame):
         layout.setSpacing(12)
 
         lbl = QLabel(title)
-        lbl.setStyleSheet("color: #111111; font-size: 15px; font-weight: 700;")
+        lbl.setStyleSheet("color: #ffffff; font-size: 15px; font-weight: 700;")
         layout.addWidget(lbl, 1)
 
         icon_lbl = QLabel(icon)
@@ -894,7 +894,7 @@ class FontSizeExpander(QFrame):
     def __init__(self, current: str, parent=None):
         super().__init__(parent)
         self.setStyleSheet(
-            "QFrame#fontExpander { background-color: #ffffff; border-radius: 14px; } "
+            "QFrame#fontExpander { background-color: #272732; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; } "
             "QLabel { background: transparent; border: none; }"
         )
         self.setObjectName("fontExpander")
@@ -909,13 +909,13 @@ class FontSizeExpander(QFrame):
         head.setContentsMargins(16, 14, 16, 14)
         head.setSpacing(12)
         lbl = QLabel("Размер шрифта")
-        lbl.setStyleSheet("color: #111111; font-size: 15px; font-weight: 700;")
+        lbl.setStyleSheet("color: #ffffff; font-size: 15px; font-weight: 700;")
         head.addWidget(lbl, 1)
         aa = QLabel("Aa")
-        aa.setStyleSheet("color: #333333; font-size: 16px; font-weight: 800;")
+        aa.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 16px; font-weight: 800;")
         head.addWidget(aa)
         self.chev = QLabel("▾")
-        self.chev.setStyleSheet("color: #999999; font-size: 13px;")
+        self.chev.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 13px;")
         head.addWidget(self.chev)
         outer.addWidget(self.header)
 
@@ -933,7 +933,7 @@ class FontSizeExpander(QFrame):
             b.setChecked(size == current)
             b.setFixedHeight(34)
             b.setStyleSheet(
-                "QPushButton { background-color: #f2f2f2; color: #111111; border-radius: 10px; font-weight: 700; }"
+                "QPushButton { background-color: rgba(255,255,255,0.08); color: #ffffff; border-radius: 10px; font-weight: 700; }"
                 "QPushButton:checked { background-color: #5D5FEF; color: white; }"
             )
             b.clicked.connect(lambda _, s=size: self._select(s))
@@ -943,7 +943,7 @@ class FontSizeExpander(QFrame):
 
         hint = QLabel("Размер применяется ко всем экранам приложения и не влияет на настройки устройства.")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #888888; font-size: 11px; font-weight: 600;")
+        hint.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; font-weight: 600;")
         body.addWidget(hint)
 
         outer.addWidget(self.body)

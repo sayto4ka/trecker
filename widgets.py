@@ -16,7 +16,7 @@ from PySide6.QtGui import QFont, QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QFrame,
     QLineEdit, QSpinBox, QComboBox, QCheckBox, QTimeEdit, QGraphicsDropShadowEffect,
-    QScrollArea, QSizePolicy
+    QScrollArea, QSizePolicy, QAbstractButton
 )
 
 from models import Habit, HabitStore, WEEKDAYS_RU_SHORT, MONTHS_RU, THEME_COLORS, today, MARK_COLORS, PERIODS, str_to_date
@@ -127,14 +127,6 @@ def icon_badge(icon: str, key: str, size: int = 40) -> QLabel:
     lbl.setFont(f)
     lbl.setStyleSheet(f"background-color: {badge_color(key)}; border-radius: {size // 2}px;")
     return lbl
-
-
-def checkbox_style(size: int = 24, checked_color: str = "#34c471") -> str:
-    return (
-        f"QCheckBox::indicator {{ width: {size}px; height: {size}px; border-radius: {size // 4 + 2}px; "
-        f"border: 2px solid rgba(0,0,0,0.35); background-color: rgba(255,255,255,0.6); }}"
-        f"QCheckBox::indicator:checked {{ background-color: {checked_color}; border: 2px solid {checked_color}; }}"
-    )
 
 
 def primary_button(text: str, accent: str) -> QPushButton:
@@ -817,59 +809,173 @@ class _MonthGrid(QFrame):
 
 
 # ------------------------------------------------------------------ Settings row helpers
-class SettingsToggleRow(QFrame):
+class ToggleSwitch(QAbstractButton):
+    """Тумблер-«пилюля» (трек + кружок), нарисованный вручную — как в HTML-макете
+    экрана «Настройки» (42x24, зелёный/серый)."""
+
+    def __init__(self, checked: bool = False, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setChecked(checked)
+        self.setFixedSize(42, 24)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        h = self.height()
+        painter.setBrush(QColor("#34c471") if self.isChecked() else QColor("#d9d9d9"))
+        painter.drawRoundedRect(self.rect(), h / 2, h / 2)
+        d = h - 4
+        x = self.width() - d - 2 if self.isChecked() else 2
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawEllipse(x, 2, d, d)
+
+
+class SettingsPillRow(QFrame):
+    """Белая «пилюля» настройки с эмодзи-иконкой и тумблером — клик в любом
+    месте карточки (кроме самого тумблера) тоже переключает значение."""
+
     toggled = Signal(bool)
 
-    def __init__(self, title: str, checked: bool, parent=None):
+    def __init__(self, title: str, icon: str, checked: bool, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"QFrame {{ background-color: {COLOR_CARD_TRANSLUCENT}; border-radius: 12px; }} QLabel {{ background: transparent; border: none; }}")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(
+            "QFrame { background-color: #ffffff; border-radius: 14px; } "
+            "QLabel { background: transparent; border: none; }"
+        )
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setContentsMargins(16, 13, 16, 13)
+        layout.setSpacing(12)
+
         lbl = QLabel(title)
-        lbl.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 15px; font-weight: 600;")
+        lbl.setStyleSheet("color: #111111; font-size: 15px; font-weight: 700;")
         layout.addWidget(lbl, 1)
-        self.switch = QCheckBox()
-        self.switch.setFixedSize(30, 28)
-        self.switch.setStyleSheet(checkbox_style(24, checked_color="#34c471"))
-        self.switch.setChecked(checked)
-        self.switch.stateChanged.connect(lambda _: self.toggled.emit(self.switch.isChecked()))
+
+        icon_lbl = QLabel(icon)
+        icon_lbl.setStyleSheet("font-size: 18px;")
+        layout.addWidget(icon_lbl)
+
+        self.switch = ToggleSwitch(checked)
+        self.switch.toggled.connect(self.toggled.emit)
         layout.addWidget(self.switch)
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.switch.toggle()
+        super().mousePressEvent(event)
 
-class FontSizeRow(QFrame):
+
+class FontSizeExpander(QFrame):
+    """Раскрывающаяся карточка «Размер шрифта» — заголовок (клик) показывает/скрывает
+    ряд S/M/L и пояснение, шеврон переворачивается, как в HTML-макете."""
+
     changed = Signal(str)
 
     def __init__(self, current: str, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"QFrame {{ background-color: {COLOR_CARD_TRANSLUCENT}; border-radius: 12px; }} QLabel {{ background: transparent; border: none; }}")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)
-        lbl = QLabel("Размер шрифта")
-        lbl.setStyleSheet(f"color: {COLOR_TEXT_DARK}; font-size: 15px; font-weight: 600;")
-        layout.addWidget(lbl, 1)
+        self.setStyleSheet(
+            "QFrame#fontExpander { background-color: #ffffff; border-radius: 14px; } "
+            "QLabel { background: transparent; border: none; }"
+        )
+        self.setObjectName("fontExpander")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
+        self.header = QFrame()
+        self.header.setCursor(Qt.PointingHandCursor)
+        self.header.mousePressEvent = lambda e: self._toggle()
+        head = QHBoxLayout(self.header)
+        head.setContentsMargins(16, 14, 16, 14)
+        head.setSpacing(12)
+        lbl = QLabel("Размер шрифта")
+        lbl.setStyleSheet("color: #111111; font-size: 15px; font-weight: 700;")
+        head.addWidget(lbl, 1)
+        aa = QLabel("Aa")
+        aa.setStyleSheet("color: #333333; font-size: 16px; font-weight: 800;")
+        head.addWidget(aa)
+        self.chev = QLabel("▾")
+        self.chev.setStyleSheet("color: #999999; font-size: 13px;")
+        head.addWidget(self.chev)
+        outer.addWidget(self.header)
+
+        self.body = QWidget()
+        body = QVBoxLayout(self.body)
+        body.setContentsMargins(16, 0, 16, 16)
+        body.setSpacing(10)
+
+        size_row = QHBoxLayout()
+        size_row.setSpacing(8)
         self.buttons = {}
-        group_box = QHBoxLayout()
-        group_box.setSpacing(4)
         for size in ("S", "M", "L"):
             b = QPushButton(size)
             b.setCheckable(True)
-            b.setFixedSize(30, 30)
             b.setChecked(size == current)
+            b.setFixedHeight(34)
             b.setStyleSheet(
-                "QPushButton { background-color: rgba(255,255,255,0.5); color: #1c1c22; border-radius: 8px; "
-                "font-weight: 700; }"
-                "QPushButton:checked { background-color: #6366f1; color: white; }"
+                "QPushButton { background-color: #f2f2f2; color: #111111; border-radius: 10px; font-weight: 700; }"
+                "QPushButton:checked { background-color: #5D5FEF; color: white; }"
             )
             b.clicked.connect(lambda _, s=size: self._select(s))
             self.buttons[size] = b
-            group_box.addWidget(b)
-        layout.addLayout(group_box)
+            size_row.addWidget(b)
+        body.addLayout(size_row)
+
+        hint = QLabel("Размер применяется ко всем экранам приложения и не влияет на настройки устройства.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888888; font-size: 11px; font-weight: 600;")
+        body.addWidget(hint)
+
+        outer.addWidget(self.body)
+        self.body.setVisible(False)
+
+    def _toggle(self):
+        opening = not self.body.isVisible()
+        self.body.setVisible(opening)
+        self.chev.setText("▴" if opening else "▾")
 
     def _select(self, size: str):
         for s, b in self.buttons.items():
             b.setChecked(s == size)
         self.changed.emit(size)
+
+
+class HelpRow(QFrame):
+    """Тёмная строка секции «Помощь» — иконка в бейдже, название, шеврон."""
+
+    clicked = Signal()
+
+    def __init__(self, icon: str, title: str, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(
+            "QFrame { background-color: #272732; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; } "
+            "QLabel { background: transparent; border: none; }"
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 13, 16, 13)
+        layout.setSpacing(12)
+
+        ico = QLabel(icon)
+        ico.setFixedSize(30, 30)
+        ico.setAlignment(Qt.AlignCenter)
+        ico.setStyleSheet("background-color: rgba(93,95,239,0.18); border-radius: 9px; font-size: 14px;")
+        layout.addWidget(ico)
+
+        lbl = QLabel(title)
+        lbl.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 600;")
+        layout.addWidget(lbl, 1)
+
+        chev = QLabel("›")
+        chev.setStyleSheet("color: rgba(255,255,255,0.25); font-size: 14px;")
+        layout.addWidget(chev)
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 # ------------------------------------------------------------------ Add habit form (встроенный экран)

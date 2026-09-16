@@ -6,18 +6,20 @@ main.py — точка входа приложения «Трекер привы
 """
 import os
 import sys
+from datetime import datetime
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QFontDatabase, QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QScrollArea, QStackedWidget, QLineEdit, QMessageBox, QFrame,
+    QSystemTrayIcon, QStyle,
 )
 
-from models import HabitStore, today
+from models import HabitStore, today, date_to_str
 from widgets import (
     TopBar, ProfilePage, CalendarPage, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
-        HabitRow, AddHabitForm, SettingsToggleRow, FontSizeRow, IconPickerPage,
+        HabitRow, AddHabitForm, SettingsPillRow, FontSizeExpander, HelpRow, IconPickerPage,
     BottomNav, primary_button, res_icon, hide_scrollbar,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
     COLOR_HABITS_CARD, COLOR_ADD_CARD, COLOR_HOME_CARD_BG,
@@ -416,15 +418,34 @@ class SettingsPage(QWidget):
         top.back_clicked.connect(lambda: mw.go_to(IDX_HOME))
         outer.addWidget(top)
 
-        self.notif_row = SettingsToggleRow("Уведомления", store.settings.get("notifications", True))
+        self.notif_row = SettingsPillRow("Уведомления", "🔔", store.settings.get("notifications", True))
         self.notif_row.toggled.connect(store.set_notifications)
         outer.addWidget(self.notif_row)
 
-        self.font_row = FontSizeRow(store.settings.get("font_size", "M"))
+        self.font_row = FontSizeExpander(store.settings.get("font_size", "M"))
         self.font_row.changed.connect(store.set_font_size)
         outer.addWidget(self.font_row)
 
+        help_title = QLabel("ПОМОЩЬ")
+        help_title.setStyleSheet(
+            "color: rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; margin: 8px 0 0 4px;"
+        )
+        outer.addWidget(help_title)
+
+        feedback_row = HelpRow("💬", "Обратная связь")
+        feedback_row.clicked.connect(self._open_feedback)
+        outer.addWidget(feedback_row)
+
+        about_row = HelpRow("ℹ️", "О приложении")
+        about_row.clicked.connect(self._open_about)
+        outer.addWidget(about_row)
+
         outer.addStretch()
+
+    def _open_feedback(self):
+        QMessageBox.information(self, "Обратная связь", "Напишите нам: feedback.habit-tracker@mail.ru")
+    def _open_about(self):
+        QMessageBox.information(self, "О приложении", "Трекер привычек\nВерсия 1.0")
 
 
 # ------------------------------------------------------------------ Главное окно
@@ -465,6 +486,19 @@ class MainWindow(QMainWindow):
                     self.calendar_page, self.profile_page):
             self.stack.addWidget(page)
 
+        # ---------- системные уведомления (Windows toast через трей) ----------
+        self._notified = set()  # (habit_id, дата) — чтобы уведомление всплыло ровно один раз
+        self.tray = None
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray = QSystemTrayIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation), self)
+            self.tray.setToolTip("Трекер привычек")
+            self.tray.show()
+
+        self.reminder_timer = QTimer(self)
+        self.reminder_timer.setInterval(20_000)  # проверка каждые 20 сек — достаточно для минутной точности
+        self.reminder_timer.timeout.connect(self._check_reminders)
+        self.reminder_timer.start()
+
         nav_wrap = QWidget()
         nav_wrap_layout = QVBoxLayout(nav_wrap)
         nav_wrap_layout.setContentsMargins(16, 6, 16, 14)
@@ -483,7 +517,27 @@ class MainWindow(QMainWindow):
         self.go_to(IDX_HOME)
 
     def go_to_add_habit(self):
-        self.go_to(IDX_ADD_HABIT)  
+        self.go_to(IDX_ADD_HABIT)
+
+    def _check_reminders(self):
+        """Раз в ~20 секунд: показывает системное уведомление ровно один раз в
+        минуту, указанную в напоминании привычки, и обновляет списки, чтобы
+        задача, время которой прошло, сразу пропадала из «Ближайших задач»,
+        а будильник переходил к следующей по времени."""
+        now_str = datetime.now().strftime("%H:%M")
+        today_str = date_to_str(today())
+        notifications_on = self.store.settings.get("notifications", True)
+        for h in self.store.habits:
+            if h.reminder_time == now_str and not h.is_done(today()):
+                key = (h.id, today_str)
+                if key not in self._notified:
+                    self._notified.add(key)
+                    if notifications_on and self.tray:
+                        self.tray.showMessage(h.name, "Пора выполнить привычку!",
+                                               QSystemTrayIcon.Information, 8000)
+        self.home_page.refresh()
+        if self.stack.currentWidget() is self.reminders_page:
+            self.reminders_page.refresh()  
               
     def on_icon_chosen(self, emoji: str):
         self.add_habit_page.form.set_icon(emoji)

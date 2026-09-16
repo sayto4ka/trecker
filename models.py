@@ -230,10 +230,18 @@ class HabitStore:
 
     # ---------- выборки ----------
     def upcoming_reminders(self) -> List[Habit]:
-        """Привычки с напоминанием, ещё не выполненные сегодня; сортировка по времени,
-        при совпадении времени — по алфавиту."""
+        """Привычки с напоминанием на сегодня, время которых ещё НЕ наступило
+        (>= текущего времени устройства), и которые ещё не выполнены.
+        Сортировка по времени (при совпадении — по алфавиту), поэтому первый
+        элемент списка всегда реально ближайший по времени, а не просто самый
+        ранний по расписанию: как только время напоминания проходит, оно
+        пропадает из списка и «эстафету» принимает следующее по времени."""
         t = today()
-        result = [h for h in self.habits if h.reminder_time and not h.is_done(t)]
+        now_str = datetime.now().strftime("%H:%M")
+        result = [
+            h for h in self.habits
+            if h.reminder_time and h.reminder_time >= now_str and not h.is_done(t)
+        ]
         result.sort(key=lambda h: (h.reminder_time, h.name.lower()))
         return result
 

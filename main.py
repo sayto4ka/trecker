@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from models import HabitStore, today, date_to_str, FONT_SCALES
 from widgets import (
     TopBar, ProfilePage, CalendarPage, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
-        HabitRow, AddHabitForm, SettingsPillRow, FontSizeExpander, HelpRow, IconPickerPage,
+        HabitRow, DIALOG_QSS, AddHabitForm, SettingsPillRow, FontSizeExpander, HelpRow, IconPickerPage,
     BottomNav, primary_button, res_icon, set_font_scale, hide_scrollbar,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
     COLOR_HABITS_CARD, COLOR_ADD_CARD, COLOR_HOME_CARD_BG,
@@ -595,6 +595,7 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    app.setStyleSheet(DIALOG_QSS)   # <-- добавить
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

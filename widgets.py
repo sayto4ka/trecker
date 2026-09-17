@@ -2524,3 +2524,38 @@ class BottomNav(QFrame):
     def set_checked(self, idx: Optional[int]):
         for i, b in enumerate(self.buttons):
             b.setChecked(i == idx)
+            
+DIALOG_QSS = """
+QMessageBox, QInputDialog, QDialog {
+    background-color: #1c1c22;
+}
+QMessageBox QLabel, QInputDialog QLabel, QDialog QLabel {
+    color: #ffffff;
+    font-size: 13px;
+}
+QMessageBox QPushButton, QInputDialog QPushButton, QDialog QPushButton {
+    background-color: #272732;
+    color: #ffffff;
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 10px;
+    padding: 6px 16px;
+    min-width: 70px;
+    font-weight: 600;
+}
+QMessageBox QPushButton:hover, QInputDialog QPushButton:hover, QDialog QPushButton:hover {
+    background-color: #34343f;
+}
+QMessageBox QPushButton:default, QInputDialog QPushButton:default {
+    background-color: #5D5FEF;
+    border-color: #5D5FEF;
+}
+QInputDialog QLineEdit, QDialog QLineEdit {
+    background-color: #ffffff;
+    color: #000000;
+    border: 1px solid #5D5FEF;
+    border-radius: 8px;
+    padding: 5px 8px;
+    selection-background-color: #5D5FEF;
+    selection-color: #ffffff;
+}
+"""

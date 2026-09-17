@@ -85,7 +85,11 @@ def subtle_scrollbar_qss() -> str:
         "QScrollBar::handle:horizontal:hover { background: rgba(255,255,255,0.32); }"
         "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; border: none; background: transparent; }"
         "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }"
-        "QScrollBar:vertical { width: 0px; background: transparent; }"
+        "QScrollBar:vertical { width: 5px; background: transparent; margin: 0px; }"
+        "QScrollBar::handle:vertical { background: rgba(255,255,255,0.18); border-radius: 2px; min-height: 24px; }"
+        "QScrollBar::handle:vertical:hover { background: rgba(255,255,255,0.32); }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; border: none; background: transparent; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
     )
 
 def tinted_pixmap(filename: str, size: int, color: str) -> "QPixmap":
@@ -579,6 +583,7 @@ class HabitRow(QFrame):
     toggled = Signal(str)
     deleted = Signal(str)
     incremented = Signal(str)
+    decremented = Signal(str)
 
     BASE_WIDTH = 358   # ширина карточки, под которую подобраны исходные размеры
     MIN_SCALE = 0.6
@@ -662,13 +667,8 @@ class HabitRow(QFrame):
         if habit.target > 1:
             plus_row = QHBoxLayout()
             plus_row.addStretch()
-            self.plus_btn = QPushButton(f"+1 ({habit.progress_for(today())}/{habit.target} {habit.unit})")
+            self.plus_btn = QLabel(f"{habit.progress_for(today())}/{habit.target} {habit.unit}")
             self.plus_btn.setFixedHeight(26)
-            self.plus_btn.setStyleSheet(
-                f"QPushButton {{ background-color: {accent}; color: white; border-radius: 9px; "
-                f"font-weight: 700; font-size: 11px; padding: 0 10px; }}"
-            )
-            self.plus_btn.clicked.connect(lambda: self.incremented.emit(habit.id))
             plus_row.addWidget(self.plus_btn)
             self.outer.addLayout(plus_row)
 
@@ -778,10 +778,16 @@ class _MonthGrid(QFrame):
             if d == t:
                 cell = QPushButton()
                 cell.setCursor(Qt.PointingHandCursor)
-                cell.clicked.connect(lambda: self.row.toggled.emit(habit.id))
+                if habit.target > 1:
+                    cell.clicked.connect(lambda: self.row.incremented.emit(habit.id))
+                    cell.setContextMenuPolicy(Qt.CustomContextMenu)
+                    cell.customContextMenuRequested.connect(lambda pos: self.row.decremented.emit(habit.id))
+                else:
+                    cell.clicked.connect(lambda: self.row.toggled.emit(habit.id))
             else:
                 cell = QPushButton()
                 cell.setEnabled(False)
+            
             cell.setFixedSize(24, 24)
             cell.setStyleSheet(
                 f"QPushButton {{ background-color: {bg}; border-radius: 10px; border: none; }} "
@@ -1695,7 +1701,7 @@ class HeatmapCard(QFrame):
 
         legend = QHBoxLayout()
         legend.addStretch()
-        less = QLabel("меньше")
+        less = QLabel("Ничего не выполнено")
         less.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 600;")
         legend.addWidget(less)
         for color in self.LEVEL_COLORS:
@@ -1703,7 +1709,7 @@ class HeatmapCard(QFrame):
             i.setFixedSize(10, 10)
             i.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
             legend.addWidget(i)
-        more = QLabel("больше")
+        more = QLabel("Всё выполнено")
         more.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 600;")
         legend.addWidget(more)
         outer.addLayout(legend)
@@ -1796,15 +1802,16 @@ class StatsPage(QWidget):
 
         self.content_host = QWidget()
         self.content_layout = QVBoxLayout(self.content_host)
-        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setContentsMargins(0, 0, 8, 0)
         self.content_layout.setSpacing(14)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }" + subtle_scrollbar_qss())
         scroll.setWidget(self.content_host)
-        hide_scrollbar(scroll)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         outer.addWidget(scroll, 1)
 
         self._select_period("week")

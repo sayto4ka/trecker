@@ -20,7 +20,7 @@ from models import HabitStore, today, date_to_str, FONT_SCALES
 from widgets import (
     TopBar, ProfilePage, CalendarPage, StatsPage, WeekStrip, ReminderPreviewCard, ReminderRow, HomeActionCard,
         HabitRow, DIALOG_QSS, AddHabitForm, SettingsPillRow, FontSizeExpander, HelpRow, IconPickerPage,
-    BottomNav, primary_button, res_icon, set_font_scale, hide_scrollbar,
+    BottomNav, primary_button, res_icon, set_font_scale, hide_scrollbar, subtle_scrollbar_qss,
     COLOR_APP_BG, COLOR_ONBOARD_BG, COLOR_TEXT_DARK, COLOR_TEXT_MUTED,
     COLOR_HABITS_CARD, COLOR_ADD_CARD, COLOR_HOME_CARD_BG,
 )
@@ -248,8 +248,9 @@ class HabitsPage(QWidget):
 
         self.list_area = QScrollArea()
         self.list_area.setWidgetResizable(True)
-        self.list_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        hide_scrollbar(self.list_area)
+        self.list_area.setStyleSheet("QScrollArea { border: none; background: transparent; }" + subtle_scrollbar_qss())
+        self.list_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.list_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_container = QWidget()
         self.list_container.setStyleSheet("background: transparent;")
         self.list_layout = QVBoxLayout(self.list_container)
@@ -277,6 +278,11 @@ class HabitsPage(QWidget):
 
     def on_increment(self, habit_id: str):
         self.store.increment(habit_id, today())
+        self.refresh()
+        self.mw.home_page.refresh()
+
+    def on_decrement(self, habit_id: str):
+        self.store.increment(habit_id, today(), step=-1)
         self.refresh()
         self.mw.home_page.refresh()
 
@@ -308,6 +314,7 @@ class HabitsPage(QWidget):
                 row = HabitRow(h, COLOR_HABITS_CARD)
                 row.toggled.connect(self.on_toggle)
                 row.incremented.connect(self.on_increment)
+                row.decremented.connect(self.on_decrement)
                 row.deleted.connect(self.on_delete)
                 row.apply_scale(self._scale)
                 self.list_layout.addWidget(row)
@@ -334,12 +341,19 @@ class AddHabitPage(QWidget):
         self.form.submitted.connect(self.on_submit)
         self.form.icon_pick_requested.connect(lambda: mw.go_to(IDX_ICON_PICKER))
 
+        form_host = QWidget()
+        form_host.setStyleSheet("background: transparent;")
+        form_host_layout = QHBoxLayout(form_host)
+        form_host_layout.setContentsMargins(0, 0, 8, 0)
+        form_host_layout.addWidget(self.form)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("background: transparent;")
-        scroll.setWidget(self.form)
-        hide_scrollbar(scroll)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }" + subtle_scrollbar_qss())
+        scroll.setWidget(form_host)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         outer.addWidget(scroll, 1)
 
     def on_submit(self, data: dict):
@@ -369,8 +383,9 @@ class RemindersPage(QWidget):
 
         self.list_area = QScrollArea()
         self.list_area.setWidgetResizable(True)
-        self.list_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        hide_scrollbar(self.list_area)
+        self.list_area.setStyleSheet("QScrollArea { border: none; background: transparent; }" + subtle_scrollbar_qss())
+        self.list_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.list_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_container = QWidget()
         self.list_container.setStyleSheet("background: transparent;")
         self.list_layout = QVBoxLayout(self.list_container)
